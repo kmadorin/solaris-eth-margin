@@ -10,9 +10,9 @@ import "./EIP712Alien.sol";
 import "./libraries/ArgumentsDecoder.sol";
 import { FlashLoanReceiverBase } from "./helpers/FlashLoanReceiverBase.sol";
 import { ILendingPoolAddressesProvider } from "./interfaces/ILendingPoolAddressesProvider.sol";
-// import { IProtocolDataProvider } from "./interfaces/IProtocolDataProvider.sol";
-// import {IStableDebtToken} from "./interfaces/IStableDebtToken.sol";
-// import "hardhat/console.sol";
+import { IProtocolDataProvider } from "./interfaces/IProtocolDataProvider.sol";
+import {IStableDebtToken} from "./interfaces/IStableDebtToken.sol";
+import "hardhat/console.sol";
 
 
 contract SolarisMargin is Ownable, EIP712Alien, FlashLoanReceiverBase {
@@ -52,20 +52,21 @@ contract SolarisMargin is Ownable, EIP712Alien, FlashLoanReceiverBase {
 
     address private immutable _limitOrderProtocol;
     address private immutable _oneInchExchange;
-    // IProtocolDataProvider private immutable _dataProvider;
+    IProtocolDataProvider private immutable _dataProvider;
 
     mapping(bytes32 => Order) private _orders; // orderHash => Order
     mapping(address => Position[]) public positions;
     mapping(address => uint256) public positionsOpen;
     mapping(bytes32 => Position) public positionsByOrder; //orderHash => Position
 
-    // constructor(address limitOrderProtocol, address oneInchExchange, ILendingPoolAddressesProvider addressProvider, IProtocolDataProvider dataProvider)
-    constructor(address limitOrderProtocol, address oneInchExchange, ILendingPoolAddressesProvider addressProvider)
+    constructor(address limitOrderProtocol, address oneInchExchange, ILendingPoolAddressesProvider addressProvider, IProtocolDataProvider dataProvider)
+    // constructor(address limitOrderProtocol, address oneInchExchange, ILendingPoolAddressesProvider addressProvider)
     EIP712Alien(limitOrderProtocol, "1inch Limit Order Protocol", "1")
     FlashLoanReceiverBase(addressProvider)
     {
         _limitOrderProtocol = limitOrderProtocol;
         _oneInchExchange = oneInchExchange;
+        _dataProvider = dataProvider;
     }
 
     /// @notice creates leveraged position and stores asset, amount, user
@@ -86,7 +87,7 @@ contract SolarisMargin is Ownable, EIP712Alien, FlashLoanReceiverBase {
         address initiator,
         bytes calldata params
     ) external override returns (bool) {
-        uint256 operation = abi.decode(params, (uint256));
+        int8 operation = abi.decode(params, (int8));
         if (operation == 0) {
             _executeLongLeverage(assets[0], amounts[0], premiums[0], params);
         } else if (operation == 1) {
@@ -119,12 +120,13 @@ contract SolarisMargin is Ownable, EIP712Alien, FlashLoanReceiverBase {
         bytes calldata oneInchData,
         bytes32 orderHash
     ) public {
+        console.log('Long leverage');
 		//approve credit delegation
-        // (address aPositionAssetAddress, address stableDebtTokenAddress,) = _dataProvider.getReserveTokensAddresses(positionAsset);
-        // IStableDebtToken(stableDebtTokenAddress).approveDelegation(address(this), type(uint128).max);
+        (address aPositionAssetAddress, address stableDebtTokenAddress,) = _dataProvider.getReserveTokensAddresses(positionAsset);
+        IStableDebtToken(stableDebtTokenAddress).approveDelegation(address(this), type(uint128).max);
 
-		// //approve collateral transfer
-        // IERC20(aPositionAssetAddress).approve(address(this), type(uint128).max);
+		//approve collateral transfer
+        IERC20(aPositionAssetAddress).approve(address(this), type(uint128).max);
 
         address receiverAddress = address(this);
 
@@ -139,10 +141,13 @@ contract SolarisMargin is Ownable, EIP712Alien, FlashLoanReceiverBase {
         modes[0] = 0;
 
         address onBehalfOf = address(this);
-        bytes memory params = abi.encode(0, msg.sender, loanAsset, positionAsset, leverage, oneInchData, orderHash);
+        // bytes memory params = abi.encode(0, msg.sender, positionAsset, leverage, oneInchData);
+
+        bytes memory params = abi.encode(0);
+
         uint16 referralCode = 0;
 
-        LENDING_POOL.flashLoan(receiverAddress, assets, amounts, modes, onBehalfOf, params, referralCode);
+        // LENDING_POOL.flashLoan(receiverAddress, assets, amounts, modes, onBehalfOf, params, referralCode);
     }
 
     function _executeLongLeverage(
@@ -152,29 +157,43 @@ contract SolarisMargin is Ownable, EIP712Alien, FlashLoanReceiverBase {
         bytes memory params
     ) private {
         // decode params
-        (, address sender, address positionAsset, uint8 leverage, bytes memory oneInchData) =
-            abi.decode(params, (uint256, address, address, uint8, bytes));
-        // transfer collateral from user to contract
-        IERC20(asset).transferFrom(sender, address(this), amount.div(leverage));
-        // approve for 1inch
-        if (IERC20(asset).allowance(address(this), address(_oneInchExchange)) < amount.div(leverage)) {
-            IERC20(asset).approve(address(_oneInchExchange), type(uint128).max);
-        }
-        // 1inch trade
-        (, bytes memory res) = _oneInchExchange.call(oneInchData);
-        uint256 balanceFrom1Inch = _toUint256(res);
+        // (, address sender, address positionAsset, uint8 leverage, bytes memory oneInchData) =
+        //     abi.decode(params, (uint256, address, address, uint8, bytes));
+        console.log('_executeLongLeverage');
+        // // console.log(amount.div(leverage));
+        // // console.log(asset);
+        // // console.log(sender);
+        // // console.log(IERC20(asset).balanceOf(sender));
+        // // transfer collateral from user to contract
+        // IERC20(asset).transferFrom(sender, address(this), amount.div(leverage));
+        // // approve for 1inch
+        // if (IERC20(asset).allowance(address(this), address(_oneInchExchange)) < amount.div(leverage)) {
+        //     IERC20(asset).approve(address(_oneInchExchange), type(uint128).max);
+        // }
+
+        // // 1inch trade
+        // (, bytes memory res) = _oneInchExchange.call(oneInchData);
+        // uint256 balanceFrom1Inch = _toUint256(res);
         // if no aave allowance, approve
-        if (IERC20(positionAsset).allowance(address(this), address(LENDING_POOL)) < balanceFrom1Inch) {
-            IERC20(positionAsset).approve(address(LENDING_POOL), type(uint128).max);
-        }
-        // deposit collateral to aave on behalf of user
-        LENDING_POOL.deposit(positionAsset, balanceFrom1Inch, sender, 0);
-        LENDING_POOL.borrow(asset, amount.add(premium), 2, 0, sender);
-        // save position info in storage
-        Position memory newPosition =
-            Position(positions[sender].length, 0, asset, positionAsset, amount, balanceFrom1Inch, sender);
-        positions[sender].push(newPosition);
-        positionsOpen[sender]++;
+        // if (IERC20(positionAsset).allowance(address(this), address(LENDING_POOL)) < balanceFrom1Inch) {
+        //     IERC20(positionAsset).approve(address(LENDING_POOL), type(uint128).max);
+        // }
+
+        IERC20(asset).approve(address(LENDING_POOL), type(uint128).max);
+
+        // // console.log('before aave deposit');
+        // // console.log('balanceFrom1Inch', balanceFrom1Inch);
+        // // deposit collateral to aave on behalf of user
+        // LENDING_POOL.deposit(positionAsset, balanceFrom1Inch, sender, 0);
+        // console.log('after aave deposit');
+        // LENDING_POOL.borrow(asset, amount.add(premium), 2, 0, sender);
+        // // save position info in storage
+        // Position memory newPosition =
+        //     Position(positions[sender].length, 0, asset, positionAsset, amount, balanceFrom1Inch, sender);
+        // positions[sender].push(newPosition);
+        // // positionsOpen[sender]++;
+
+        // console.log('position created');
         // positionsByOrder[orderHash] = newPosition;
         // createOrder(orderHash, loanAsset, amount);
     }
@@ -436,8 +455,8 @@ contract SolarisMargin is Ownable, EIP712Alien, FlashLoanReceiverBase {
         // IERC20(_position.collateral).transferFrom(_position.user, address(this), newAmount);
         // LENDING_POOL.withdraw(_position.collateral, newAmount, address(this));
 
-        IERC20(makerAsset).safeApprove(_limitOrderProtocol, 0);
-        IERC20(makerAsset).safeApprove(_limitOrderProtocol, makingAmount);
+        // IERC20(makerAsset).safeApprove(_limitOrderProtocol, 0);
+        // IERC20(makerAsset).safeApprove(_limitOrderProtocol, makingAmount);
 
         // order.remaining -= makingAmount;
 

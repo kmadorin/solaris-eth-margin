@@ -29,7 +29,8 @@ module.exports = {
         },
         hardhat: {
             forking: {
-                url: 'https://mainnet.infura.io/v3/YOUR_INFURA_API_KEY',
+                url: 'https://mainnet.infura.io/v3/e74fddc191a0443bb0af79c5b7da6251',
+                allowUnlimitedContractSize: true,
             },
         },
     },
